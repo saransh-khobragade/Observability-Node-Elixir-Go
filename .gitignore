@@ -1,0 +1,118 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Elixir
+# Build artifacts
+_build/
+*.beam
+*.app
+*.appup
+*.config
+*.ez
+
+# Dependencies
+# Elixir dependencies directory - should NOT be committed
+# Only mix.exs and mix.lock are tracked
+elixir-service/deps/
+deps/
+
+# Mix
+.elixir_ls/
+
+# Node.js / TypeScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Go
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go-service/bin/
+go-service/dist/
+
+# Go workspace file
+go.work
+
+# Go vendor directory (if using vendoring, typically this IS committed, but adding for safety)
+# Uncomment if you want to ignore vendor directory:
+# vendor/
+
+# IDE / Editor
+# VSCode
+.vscode/
+*.code-workspace
+
+# IntelliJ / IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.cache
+
+# Docker
+.dockerignore
+
+# Coverage reports
+coverage/
+*.cover
+*.coverprofile
+
+# Test artifacts
+.test/
+test-results/
+
+# Miscellaneous
+*.pid
+*.seed
+*.pid.lock
+

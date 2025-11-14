@@ -1,0 +1,110 @@
+services:
+  elixir-service:
+    build:
+      context: ./elixir-service
+      dockerfile: Dockerfile
+    container_name: elixir-service
+    ports:
+      - "4000:4000"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://datadog-agent:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=elixir-service
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=elixir-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 1s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - app-network
+    depends_on:
+      - datadog-agent
+
+  typescript-service:
+    build:
+      context: ./typescript-service
+      dockerfile: Dockerfile
+    container_name: typescript-service
+    ports:
+      - "3000:3000"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://datadog-agent:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=typescript-service
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=typescript-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 1s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - app-network
+    depends_on:
+      - datadog-agent
+
+  go-service:
+    build:
+      context: ./go-service
+      dockerfile: Dockerfile
+    container_name: go-service
+    ports:
+      - "8080:8080"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://datadog-agent:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=go-service
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=go-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 1s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - app-network
+    depends_on:
+      - datadog-agent
+
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    container_name: datadog-agent
+    environment:
+      - DD_API_KEY=${DD_API_KEY:-dcc6a41bdf593f5e63a4494867cd24ab}
+      - DD_SITE=${DD_SITE:-datadoghq.com}
+      # Enable APM for traces
+      - DD_APM_ENABLED=true
+      - DD_APM_NON_LOCAL_TRAFFIC=true
+      - DD_APM_RECEIVER_PORT=8126
+      # Enable OTLP receiver for OpenTelemetry data
+      - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENABLED=true
+      - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENABLED=true
+      # Enable logs collection
+      - DD_LOGS_ENABLED=true
+      - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
+      - DD_CONTAINER_EXCLUDE="name:datadog-agent"
+      - DD_CONTAINER_INCLUDE="name:go-service,name:typescript-service,name:elixir-service"
+      # Enable process monitoring
+      - DD_PROCESS_AGENT_ENABLED=true
+      # Enable DogStatsD for metrics
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true
+      - DD_DOGSTATSD_PORT=8125
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+    ports:
+      - "8126:8126"   # APM (traces)
+      - "8125:8125/udp"  # DogStatsD (metrics)
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
+
