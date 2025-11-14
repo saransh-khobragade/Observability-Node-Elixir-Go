@@ -72,7 +72,7 @@ services:
     image: gcr.io/datadoghq/agent:7
     container_name: datadog-agent
     environment:
-      - DD_API_KEY=${DD_API_KEY:-dcc6a41bdf593f5e63a4494867cd24ab}
+      - DD_API_KEY=${DD_API_KEY:}
       - DD_SITE=${DD_SITE:-datadoghq.com}
       # Enable APM for traces
       - DD_APM_ENABLED=true
