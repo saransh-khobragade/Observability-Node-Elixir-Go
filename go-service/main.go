@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -22,13 +23,8 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
-type LogEntry struct {
-	Timestamp string                 `json:"timestamp"`
-	Level     string                 `json:"level"`
-	Service   string                 `json:"service"`
-	Message   string                 `json:"message"`
-	Fields    map[string]interface{} `json:"fields,omitempty"`
-}
+// LogEntry represents a structured log entry - Consistent format across all services
+type LogEntry map[string]interface{}
 
 type HealthResponse struct {
 	Status  string `json:"status"`
@@ -63,29 +59,43 @@ func init() {
 	prometheus.MustRegister(httpRequestDuration)
 }
 
-func structuredLog(level, message string, fields map[string]interface{}) {
+// log creates a structured log entry with consistent format
+// Core fields at top level, request/context fields nested in "fields" object
+func log(level, message string, additionalFields map[string]interface{}) {
 	entry := LogEntry{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Level:     level,
-		Service:   serviceName,
-		Message:   message,
-		Fields:    fields,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"level":     level,
+		"service":   serviceName,
+		"message":   message,
+	}
+	
+	// Nest additional fields in "fields" object (consistent structure)
+	if len(additionalFields) > 0 {
+		entry["fields"] = additionalFields
 	}
 	
 	jsonData, _ := json.Marshal(entry)
 	logger.Println(string(jsonData))
 }
 
+// Logger convenience methods
+var logInfo = func(message string, fields map[string]interface{}) {
+	log("INFO", message, fields)
+}
+
+var logWarn = func(message string, fields map[string]interface{}) {
+	log("WARN", message, fields)
+}
+
+var logError = func(message string, fields map[string]interface{}) {
+	log("ERROR", message, fields)
+}
+
+var logDebug = func(message string, fields map[string]interface{}) {
+	log("DEBUG", message, fields)
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	
-	fields := map[string]interface{}{
-		"remote_addr": r.RemoteAddr,
-		"method":      r.Method,
-		"path":        r.URL.Path,
-	}
-	structuredLog("INFO", "Health check requested", fields)
-	
 	response := HealthResponse{
 		Status:  "healthy",
 		Service: "go",
@@ -94,32 +104,11 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
-	
-	duration := time.Since(start).Seconds()
-	httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, "200").Inc()
-	httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
-	
-	fields["status"] = "healthy"
-	fields["duration_seconds"] = duration
-	structuredLog("INFO", "Health check completed", fields)
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	
-	fields := map[string]interface{}{
-		"remote_addr": r.RemoteAddr,
-		"method":      r.Method,
-		"path":        r.URL.Path,
-	}
-	structuredLog("INFO", "Root endpoint accessed", fields)
-	
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Go Service is running!"))
-	
-	duration := time.Since(start).Seconds()
-	httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, "200").Inc()
-	httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
 }
 
 func initTracing() {
@@ -135,7 +124,9 @@ func initTracing() {
 		otlptracegrpc.WithInsecure(),
 	)
 	if err != nil {
-		log.Printf("Failed to create OTLP trace exporter: %v", err)
+		logError("Failed to create OTLP trace exporter", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return
 	}
 	
@@ -146,7 +137,9 @@ func initTracing() {
 		otlpmetricgrpc.WithInsecure(),
 	)
 	if err != nil {
-		log.Printf("Failed to create OTLP metrics exporter: %v", err)
+		logError("Failed to create OTLP metrics exporter", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return
 	}
 	
@@ -157,7 +150,9 @@ func initTracing() {
 		),
 	)
 	if err != nil {
-		log.Printf("Failed to create resource: %v", err)
+		logError("Failed to create resource", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return
 	}
 	
@@ -177,6 +172,67 @@ func initTracing() {
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
+	
+	logInfo("OpenTelemetry SDK initialized", map[string]interface{}{
+		"otlp_endpoint": otlpEndpoint,
+	})
+}
+
+// loggingMiddleware logs all HTTP requests and responses
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		
+		// Log incoming request
+		logInfo("Incoming HTTP request", map[string]interface{}{
+			"remote_addr": r.RemoteAddr,
+			"method":      r.Method,
+			"path":        r.URL.Path,
+			"user_agent":  r.UserAgent(),
+		})
+		
+		// Wrap response writer to capture status code
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		
+		next.ServeHTTP(wrapped, r)
+		
+		duration := time.Since(start).Seconds()
+		statusCode := wrapped.statusCode
+		
+		// Determine log level based on status code
+		var logFunc func(string, map[string]interface{})
+		if statusCode >= 500 {
+			logFunc = logError
+		} else if statusCode >= 400 {
+			logFunc = logWarn
+		} else {
+			logFunc = logInfo
+		}
+		
+		// Log response
+		logFunc("HTTP request completed", map[string]interface{}{
+			"remote_addr":     r.RemoteAddr,
+			"method":          r.Method,
+			"path":            r.URL.Path,
+			"status":          statusCode,
+			"duration_seconds": duration,
+		})
+		
+		// Update metrics
+		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprintf("%d", statusCode)).Inc()
+		httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
+	})
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
 func main() {
@@ -184,12 +240,13 @@ func main() {
 	
 	r := mux.NewRouter()
 	r.Use(otelmux.Middleware(serviceName))
+	r.Use(loggingMiddleware)
 	
 	r.HandleFunc("/health", healthHandler).Methods("GET")
 	r.HandleFunc("/", rootHandler).Methods("GET")
 	r.Handle("/metrics", promhttp.Handler()).Methods("GET")
 
-	structuredLog("INFO", "Go service starting", map[string]interface{}{
+	logInfo("Go service starting", map[string]interface{}{
 		"port": 8080,
 	})
 	
